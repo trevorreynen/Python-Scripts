@@ -117,9 +117,10 @@ INPUT_PATH = r""
 # Set the output path.
 OUTPUT_PATH = r""
 
-# Set log path and file name. File name will be incremented by default to prevent overwriting.
-# LOG_PATH NOTE: Allows absolute and relative folder paths. Examples: 'Logs', './Logs', '../Logs', or 'D:/Logs/'. All are valid.
-# LOG_PATH NOTE: Set to None or '' to not have save file to any folder. It will just save the file to the same folder as the script.
+# Set the log file config.
+# LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
+#           Set to None or '' to save the log in the same directory as this script.
+# LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
 LOG_PATH = 'Logs'
 LOG_NAME = 'LogFile.txt'
 

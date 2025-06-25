@@ -1,20 +1,23 @@
-# Run by:  python ConvertAll_WEBP_to_PNG_InAFolder.py
-#! Requires ffmpeg.
-# Converts all static (non-animated) .webp files in a folder (recursively) to .png format.
-# Useful for transforming scraped or exported images into a widely supported format.
+# Run by:  python ConvertAll_XWM_to_WAV_InAFolder.py
+#! Requires the vgmstream-cli tool.
+# Converts all .xwm audio files in a folder (recursively) to .wav format.
+# Supports optional deletion or moving of source files.
 
 # Imports
 import os
-import shutil
 import subprocess
+import shutil
 import traceback
 from datetime import datetime
 
 
 #! ==========<  CONFIG  >==========
-# Set the path to scan for files.
+# Set the path to scan for XWM files.
 #INPUT_PATH = r"C:\Path\To\Folder"
-INPUT_PATH = r"C:\Path\To\Folder"
+INPUT_PATH = r"D:\SpeedTest\XWM2WAV\Test_1"
+
+# Set the output path for WAV files. If empty, converts wav's to same as INPUT_PATH.
+OUTPUT_PATH = r"D:\SpeedTest\XWM2WAV\Test_1_Output"
 
 #! Toggle this (True / False) to (delete / move or keep), respectively.
 DELETE_AFTER = False
@@ -23,14 +26,18 @@ DELETE_AFTER = False
 MOVE_FILE_PATH = r""
 
 #@ Set to True to convert largest files first.
-CONVERT_LARGEST_FIRST = False
+CONVERT_LARGEST_FIRST = True
+
+# Path to vgmstream-cli.exe (required for decoding .xwm files).
+# Download from: https://github.com/vgmstream/vgmstream
+VGMSTREAM_CLI = r"C:\\Programs\\CLI-Tools\\vgmstream\\vgmstream-cli.exe"
 
 # Set the log file config.
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
 #           Set to None or '' to save the log in the same directory as this script.
 # LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
 LOG_PATH = 'Logs'
-LOG_NAME = 'Convert_WEBP_to_PNG.txt'
+LOG_NAME = 'Convert_XWM_to_WAV.txt'
 
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
@@ -69,8 +76,8 @@ def logMsg(logFile, msg, printMsg=False, skipLogFile=False):
             log.write(msg + '\n')
 
 
-def getFileSize(filePath):
-    size = os.path.getsize(filePath)
+def getFileSize(filepath):
+    size = os.path.getsize(filepath)
 
     if size < 1024:
         return f'{size} B'
@@ -80,21 +87,6 @@ def getFileSize(filePath):
         return f'{size / 1024 ** 2:.2f} MB'
 
     return f'{size / 1024 ** 3:.2f} GB'
-
-
-def printDynamicConsole(totalFiles, completedFiles, currentFile, convertingFileStats):
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-    print(f'Total AVI files to process: {totalFiles}\n')
-    print('Files Complete:')
-
-    for index, info in enumerate(completedFiles, 1):
-        indexStr = f'{index:02}/{totalFiles:02}'
-        print(f'    {indexStr} - Start: {info["startTime"]}  ||  End: {info["endTime"]}  ||  WEBP: {info["convertingFileSize"]} -> PNG: {info["pngSize"]}  ||  {info["pngPath"].replace("\\", "/")}')
-
-    if currentFile:
-        indexStr = f'{len(completedFiles)+1:02}/{totalFiles:02}'
-        print(f'\nAt {datetime.now().strftime('%I:%M:%S:%f %p')}, Started Processing {indexStr} - WEBP Size: {convertingFileStats["size"]}  ||  {convertingFileStats["path"].replace("\\", "/")}\n')
 
 
 def collectFilesToProcess(inPath, extension):
@@ -111,31 +103,32 @@ def collectFilesToProcess(inPath, extension):
     return sorted(files, key=lambda x: os.path.getsize(x['path']), reverse=CONVERT_LARGEST_FIRST)
 
 
-def convertFiles(logFile, inPath):
-    webpFiles = collectFilesToProcess(inPath, '.webp')
-    totalFiles = len(webpFiles)
+def convertFiles(logFile, inPath, outPath):
+    # NOTE: Avoid excessive logging inside tight loops. It can significantly slow down processing.
+
+    wemFiles = collectFilesToProcess(inPath, '.xwm')
+    totalFiles = len(wemFiles)
     completedFiles = []
 
-    for index, fileInfo in enumerate(webpFiles, 1):
+    # Since no dynamic console used in this script, use logMsg but don't use it too much otherwise it slows the script down.
+    logMsg(logFile, f'Total XWM files to process: {totalFiles}\n', True)
+
+    for index, fileInfo in enumerate(wemFiles, 1):
         inputPath = fileInfo['path']
-        outputPath = os.path.splitext(inputPath)[0] + '.png'
+        wemRelativePath = os.path.relpath(inputPath, inPath)
+        wavRelativePath = os.path.splitext(wemRelativePath)[0] + '.wav'
+        outputPath = os.path.join(outPath or os.path.dirname(inputPath), wavRelativePath if outPath else os.path.basename(wavRelativePath))
+
         startTime = datetime.now().strftime('%I:%M:%S:%f %p')
         indexStr = f'{index:02}/{totalFiles:02}'
 
-        webpStats = {
-            'path': inputPath,
-            'size': fileInfo['size']
-        }
+        # This logMsg specifically might slow down the script. If it seems slow (or just want to double check), comment it out.
+        logMsg(logFile, f'At {startTime}, Started Processing {indexStr} - XWM Size: {fileInfo["size"]}  ||  {inputPath.replace("\\", "/")}', True)
+        os.makedirs(os.path.dirname(outputPath), exist_ok=True)
 
-        # Due to this script using a dynamic console, don't set logMsg print to True anywhere.
-        printDynamicConsole(totalFiles, completedFiles, inputPath, webpStats)
-
-        logMsg(logFile, f'Processing: {indexStr}')
-        logMsg(logFile, f'    Start: {startTime}  ||  WEBP Size: {fileInfo["size"]}  ||  {inputPath.replace("\\", "/")}')
-
-        # Converts .webp to .png using ffmpeg.
+        # Converts .xwm to .wav using vgmstream-cli (CLI-only, external tool required).
         result = subprocess.run(
-            ['ffmpeg', '-i', inputPath, outputPath],
+            [VGMSTREAM_CLI, '-o', outputPath, inputPath],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -143,39 +136,38 @@ def convertFiles(logFile, inPath):
         endTime = datetime.now().strftime('%I:%M:%S:%f %p')
 
         if result.returncode == 0 and os.path.exists(outputPath):
-            pngSize = getFileSize(outputPath)
+            wavSize = getFileSize(outputPath)
             completedFiles.append({
                 'startTime': startTime,
                 'endTime': endTime,
                 'convertingFileSize': fileInfo['size'],
-                'pngSize': pngSize,
-                'pngPath': outputPath
+                'wavSize': wavSize,
+                'wavPath': outputPath
             })
 
-            logMsg(logFile, f'    [SUCCESS] End: {endTime}  ||  {inputPath.replace("\\", "/")}')
-            logMsg(logFile, f'    File created: {endTime}  ||  PNG Size: {pngSize}  ||  {outputPath.replace("\\", "/")}')
+            logMsg(logFile, f'    [SUCCESS] End: {endTime}  ||  {inputPath.replace("\\", "/")}', True)
+            #logMsg(logFile, f'    File created: {endTime}  ||  WAV Size: {wavSize}  ||  {outputPath.replace("\\", "/")}', True)  # Not using due to logging slowing down the script more than anything.
 
             try:
                 if DELETE_AFTER:
                     os.remove(inputPath)
-                    logMsg(logFile, f'    Deleted original WEBP: {indexStr}  ||  {inputPath.replace("\\", "/")}')
+                    logMsg(logFile, f'    Deleted original XWM: {indexStr}  ||  {inputPath.replace("\\", "/")}', True)
                 elif MOVE_FILE_PATH:
                     dest = os.path.abspath(MOVE_FILE_PATH)
                     os.makedirs(dest, exist_ok=True)
                     shutil.move(inputPath, os.path.join(dest, os.path.basename(inputPath)))
-                    logMsg(logFile, f'    Moved original WEBP: {indexStr}  ||  {dest.replace("\\", "/")}')
-                else:
-                    logMsg(logFile, f'    Kept original WEBP: {indexStr}  ||  {inputPath.replace("\\", "/")}')
+                    #logMsg(logFile, f'    Moved original XWM to: {indexStr}  ||  {dest.replace("\\", "/")}', True)  # Not using due to logging slowing down the script more than anything.
+                #else:
+                    #logMsg(logFile, f'    Kept original XWM: {indexStr}  ||  {inputPath.replace("\\", "/")}', True)  # Not using due to logging slowing down the script more than anything.
             except Exception as e:
-                logMsg(logFile, f'    [ERROR] Error handling original file: {e}')
+                logMsg(logFile, f'    [ERROR] Error handling original file: {e}', True)
         else:
             errorMsg = result.stderr.decode('utf-8', errors='ignore')
-            logMsg(logFile, f'    [ERROR] Conversion failed: {inputPath}:\n{errorMsg}')
+            logMsg(logFile, f'    [ERROR] Conversion failed: {inputPath}:\n{errorMsg}', True)
 
         logMsg(logFile, '-----')
-        printDynamicConsole(totalFiles, completedFiles, None, webpStats)
 
-    logMsg(logFile, f'\nTotal files processed: {totalFiles}, Successful: {len(completedFiles)}.')
+    logMsg(logFile, f'\nTotal files processed: {totalFiles}, Successful: {len(completedFiles)}', True)
 
 
 if __name__ == '__main__':
@@ -185,7 +177,7 @@ if __name__ == '__main__':
     try:
         logMsg(logFile, f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S:%f %p")}.\n', True)
 
-        convertFiles(logFile, INPUT_PATH)
+        convertFiles(logFile, INPUT_PATH, OUTPUT_PATH)
 
         logMsg(logFile, f'\nLogs saved to "{logFile.replace("\\", "/")}".', True)
         logMsg(logFile, f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S:%f %p")}.', True)

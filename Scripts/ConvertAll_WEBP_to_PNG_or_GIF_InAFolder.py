@@ -4,6 +4,8 @@
 # Static .webp → .png; Animated .webp → .gif.
 # Optional file cleanup and logging supported.
 
+#! BROKEN, NEED TO FIX GIF CREATION BY USING A DIFFERENT PACKAGE
+
 # Imports
 import os
 import shutil
@@ -24,7 +26,7 @@ DELETE_AFTER = False
 MOVE_FILE_PATH = r""
 
 #@ Set to True to convert largest files first.
-CONVERT_LARGEST_FIRST = False
+CONVERT_LARGEST_FIRST = True
 
 # Set the log file config.
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
@@ -83,21 +85,6 @@ def getFileSize(filePath):
     return f'{size / 1024 ** 3:.2f} GB'
 
 
-def printDynamicConsole(totalFiles, completedFiles, currentFile, convertingFileStats):
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-    print(f'Total AVI files to process: {totalFiles}\n')
-    print('Files Complete:')
-
-    for index, info in enumerate(completedFiles, 1):
-        indexStr = f'{index:02}/{totalFiles:02}'
-        print(f'    {indexStr} - Start: {info["startTime"]}  ||  End: {info["endTime"]}  ||  WEBP: {info["convertingFileSize"]} -> PNG: {info["pngSize"]}  ||  {info["pngPath"].replace("\\", "/")}')
-
-    if currentFile:
-        indexStr = f'{len(completedFiles)+1:02}/{totalFiles:02}'
-        print(f'\nAt {datetime.now().strftime('%I:%M:%S:%f %p')}, Started Processing {indexStr} - WEBP Size: {convertingFileStats["size"]}  ||  {convertingFileStats["path"].replace("\\", "/")}\n')
-
-
 def collectFilesToProcess(inPath, extension):
     files = [
         {
@@ -112,9 +99,8 @@ def collectFilesToProcess(inPath, extension):
     return sorted(files, key=lambda x: os.path.getsize(x['path']), reverse=CONVERT_LARGEST_FIRST)
 
 
-def isAnimatedWebP(filePath):
+def isAnimatedWebp(filePath):
     # Uses ffprobe to detect if the .webp file contains animation frames.
-
     try:
         result = subprocess.run(
             [
@@ -135,7 +121,6 @@ def isAnimatedWebP(filePath):
         return False  # Assume static if ffprobe fails.
 
 
-
 def convertFiles(logFile, inPath):
     webpFiles = collectFilesToProcess(inPath, '.webp')
     totalFiles = len(webpFiles)
@@ -146,26 +131,15 @@ def convertFiles(logFile, inPath):
         startTime = datetime.now().strftime('%I:%M:%S:%f %p')
         indexStr = f'{index:02}/{totalFiles:02}'
 
-        webpStats = {
-            'path': inputPath,
-            'size': fileInfo['size']
-        }
-
-        # Due to this script using a dynamic console, don't set logMsg print to True anywhere.
-        printDynamicConsole(totalFiles, completedFiles, inputPath, webpStats)
-
-        logMsg(logFile, f'Processing: {indexStr}')
-        logMsg(logFile, f'    Start: {startTime}  ||  WEBP Size: {fileInfo["size"]}  ||  {inputPath.replace("\\", "/")}')
-
         # Determine output format based on animation check
-        isAnimated = isAnimatedWebP(inputPath)
+        isAnimated = isAnimatedWebp(inputPath)
 
         if isAnimated:
             outputPath = os.path.splitext(inputPath)[0] + '.gif'
-            ffmpegArgs = ['ffmpeg', '-i', inputPath, '-y', outputPath]
+            ffmpegArgs = ['ffmpeg', '-f', 'webp', '-i', inputPath, '-loop', '0', '-y', outputPath]
         else:
             outputPath = os.path.splitext(inputPath)[0] + '.png'
-            ffmpegArgs = ['ffmpeg', '-i', inputPath, '-frames:v', '1', '-y', outputPath]
+            ffmpegArgs = ['ffmpeg', '-i', inputPath, '-y', outputPath]
 
         # Converts .webp to .png (or .gif) using ffmpeg.
         result = subprocess.run(ffmpegArgs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -181,8 +155,7 @@ def convertFiles(logFile, inPath):
                 'pngPath': outputPath
             })
 
-            logMsg(logFile, f'    [SUCCESS] End: {endTime}  ||  {inputPath.replace("\\", "/")}')
-            logMsg(logFile, f'    File created: {endTime}  ||  Output Size: {outputSize}  ||  {outputPath.replace("\\", "/")}')
+            logMsg(logFile, f'{indexStr} - Start: {startTime}  ||  End: {endTime}  ||  WEBP: {fileInfo['size']} -> PNG: {outputSize}  ||  {outputPath.replace("\\", "/")}', True)
 
             try:
                 if DELETE_AFTER:
@@ -202,7 +175,6 @@ def convertFiles(logFile, inPath):
             logMsg(logFile, f'    [ERROR] Conversion failed: {inputPath}:\n{errorMsg}')
 
         logMsg(logFile, '-----')
-        printDynamicConsole(totalFiles, completedFiles, None, webpStats)
 
     logMsg(logFile, f'\nTotal files processed: {totalFiles}, Successful: {len(completedFiles)}.')
 
