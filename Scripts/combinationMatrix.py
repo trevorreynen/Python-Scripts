@@ -1,17 +1,36 @@
-# Run by:  python listUniqueFileExtensions.py
-# Recursively scans all files in a directory and logs each unique file extension it finds.
-# Helps identify which file types are present in a large or unknown folder structure.
-# Especially useful before filtering, transferring, or bulk-processing files by type (see transferFilesByExtension.py).
+# Run by:  python combinationMatrix.py
 
 # Imports
+import csv
+import itertools
 import os
 import traceback
 from datetime import datetime
 
 
 #! ==========<  CONFIG  >==========
-# Root path to search recursively for files (all subfolders will be included).
-INPUT_PATH = r"C:\Path\To\Folder"
+# Set the combinations to create. Can add as many as you want, with any name for the keys.
+COMBINATION_SLOTS = {
+    'Head': ['Light', 'Medium', 'Heavy'],
+    'Chest': ['Light', 'Medium', 'Heavy'],
+    'Hands': ['Light', 'Medium', 'Heavy'],
+    'Legs': ['Light', 'Medium', 'Heavy'],
+    'Feet': ['Light', 'Medium', 'Heavy'],
+    'Shield': ['', 'Round Shield', 'Kite Shield', 'Tower Shield'],
+
+    # Add as many slots as you want...
+}
+
+
+# Set the output path.
+OUTPUT_PATH = r"Output"
+
+# Set the output file name and type.
+# '.txt' = Each combination on a line, space-separated
+# '.csv' = Each combination in columns (with headers)
+OUTPUT_FILE_NAME = 'combinations'
+OUTPUT_FILE_TYPE = '.csv'  # Options: '.txt', '.csv', 'txt', 'csv'
+
 
 # Set the log file config.
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
@@ -19,7 +38,7 @@ INPUT_PATH = r"C:\Path\To\Folder"
 # LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
 USE_LOG_FILE = True  #! Enable or disable log file saving entirely.
 LOG_PATH = 'Logs'
-LOG_NAME = 'listUniqueFileExtensions.txt'
+LOG_NAME = 'combinationMatrix.txt'
 
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
@@ -74,23 +93,52 @@ def createLogger(logFile):
     return lambda msg, printMsg=False, skipLogFile=False: logMsg(msg, printMsg, logFile, skipLogFile)
 
 
-def findAllExt(inPath):
-    # Set to store unique extensions.
-    extensions = set()
+def generateCombinations(slots, outPath, outFileName, outFileType):
+    headers = list(slots.keys())
+    slotValues = list(slots.values())
 
-    # Walk through the folder.
-    for root, _, files in os.walk(inPath):
-        for file in files:
-            ext = os.path.splitext(file)[1].lower()
+    # Validate that all slot values are non-empty lists
+    for key, values in slots.items():
+        if not values:
+            LOG(f'[WARNING] Slot "{key}" has no values. Skipping generation.')
+            return
 
-            if ext:  # Skip files with no extension.
-                extensions.add(ext)
+    combinations = list(itertools.product(*slotValues))
 
-    LOG('Unique file extensions found:', True)
+    # Normalize extension
+    if outFileType.startswith('.'):
+        ext = outFileType[1:].lower()
+    else:
+        ext = outFileType.lower()
 
-    # Sort alphabetically for easier viewing and comparison.
-    for ext in sorted(extensions):
-        LOG(f"\'{ext}\',", True)
+    # Ensure output folder exists if set.
+    if outPath:
+        outputDir = os.path.abspath(outPath)
+    else:
+        outputDir = os.path.dirname(os.path.abspath(__file__))
+
+    # Ensure the output directory exists
+    os.makedirs(outputDir, exist_ok=True)
+    outputFilePath = os.path.join(outputDir, f'{outFileName}.{ext}')
+
+    try:
+        if ext == 'txt':
+            with open(outputFilePath, 'w', encoding='utf-8') as file:
+                for combo in combinations:
+                    file.write(' '.join(combo) + '\n')
+        elif ext == 'csv':
+            with open(outputFilePath, 'w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerow(headers)
+                writer.writerows(combinations)
+        else:
+            LOG(f'[ERROR] Unsupported file type: {outFileType}', True)
+            return
+
+        LOG(f'[SUCCESS] Generated {len(combinations)} combinations and saved to {outputFilePath}', True)
+
+    except Exception as e:
+        LOG(f'[ERROR] Failed to generate combinations: {e}', True)
 
 
 if __name__ == '__main__':
@@ -101,7 +149,7 @@ if __name__ == '__main__':
     try:
         LOG(f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
 
-        findAllExt(INPUT_PATH)
+        generateCombinations(COMBINATION_SLOTS, OUTPUT_PATH, OUTPUT_FILE_NAME, OUTPUT_FILE_TYPE)
 
         if USE_LOG_FILE:
             LOG(f'\nLogs saved to "{logFile.replace("\\", "/")}"', True)

@@ -13,46 +13,17 @@ from datetime import datetime
 
 #! ==========<  CONFIG  >==========
 # Number of gradient steps from base color toward white.
-BRIGHTEN_NUM = 25
+BRIGHTEN_NUM = 30
 
 # Number of gradient steps from base color toward black.
-DARKEN_NUM = 12
+DARKEN_NUM = 30
 
-# Set base colors.
-BASE_COLORS = [
-    '#FF0000',  # Red
-    '#FF7F00',  # Orange
-    '#FFFF00',  # Yellow
-    '#7FFF00',  # Chartreuse
-    '#00FF00',  # Green
-    '#00FF7F',  # Spring Green
-    '#00FFFF',  # Cyan
-    '#007FFF',  # Azure
-    '#0000FF',  # Blue
-    '#7F00FF',  # Violet
-    '#FF00FF',  # Magenta
-    '#FF007F',  # Rose
-]
-
-# NOTE: BASE_COLORS and CSV_HEADERS must have matching lengths.
-# Each header corresponds to one color column.
-CSV_HEADERS = [
-    'Red',
-    'Orange',
-    'Yellow',
-    'Chartreuse',
-    'Green',
-    'Spring Green',
-    'Cyan',
-    'Azure',
-    'Blue',
-    'Violet',
-    'Magenta',
-    'Rose',
-]
+# Hue Step to create different number of base colors automatically.
+#   4 = 90 base colors (columns), 7.2 = 50 base colors, 5 = 72 base colors.
+HUE_STEPS = 4
 
 # Set the output path.
-OUTPUT_PATH = r"./Output/"
+OUTPUT_PATH = r""
 
 # Set the CSV Name.
 CSV_NAME = 'generateColorGradientCsv.csv'
@@ -61,16 +32,24 @@ CSV_NAME = 'generateColorGradientCsv.csv'
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
 #           Set to None or '' to save the log in the same directory as this script.
 # LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
+USE_LOG_FILE = True  #! Enable or disable log file saving entirely.
 LOG_PATH = 'Logs'
 LOG_NAME = 'generateColorGradientCsv.txt'
 
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
 if CLEAR_CONSOLE: os.system('cls' if os.name == 'nt' else 'clear')
+
+# Enables global use of LOG() without needing to pass createLogger() or logFile between functions.
+LOG = lambda *args, **kwargs: None
 #! ================================
 
 
 def getNextLogFilePath(logFolder, logFileName):
+    # Skip creating log path if logging is disabled.
+    if not USE_LOG_FILE:
+        return None
+
     if logFolder:
         logPath = os.path.abspath(logFolder)
     else:
@@ -90,15 +69,24 @@ def getNextLogFilePath(logFolder, logFileName):
         logNumber += 1
 
 
-def logMsg(logFile, msg, printMsg=False, skipLogFile=False):
+def logMsg(msg, printMsg=False, logFile=None, skipLogFile=False):
     # Optional: Print to console (default: False).
     if printMsg:
         print(msg)
 
     # Optional: Skip log file (default: False).
-    if not skipLogFile:
-        with open(logFile, 'a', encoding='utf-8') as log:
-            log.write(msg + '\n')
+    if USE_LOG_FILE and not skipLogFile and logFile:
+        with open(logFile, 'a', encoding='utf-8') as f:
+            f.write(msg + '\n')
+
+
+def createLogger(logFile):
+    """
+    Returns a logging function with the given log file pre-attached.
+    This allows using LOG(msg) globally without passing the log file into every call.
+    Respects USE_LOG_FILE automatically.
+    """
+    return lambda msg, printMsg=False, skipLogFile=False: logMsg(msg, printMsg, logFile, skipLogFile)
 
 
 def getNextCsvFilePath(csvFolder, csvFileName):
@@ -155,7 +143,28 @@ def generateGradient(hexColor, brightenSteps, darkenSteps):
     return gradient
 
 
-def generateColorGradientCsv(logFile, outPath, brightenSteps, darkenSteps, baseColors, csvHeaders, csvName):
+def generateBaseHues(stepDegrees=7.2):
+    """
+    Generates evenly spaced hues around the HSL circle.
+    Each base hue is pure (full saturation), mid-lightness.
+    """
+    baseColors = []
+    headers = []
+
+    steps = int(360 / stepDegrees)
+
+    for i in range(steps):
+        hueDegree = i * stepDegrees
+        h = hueDegree / 360.0
+        r, g, b = colorsys.hls_to_rgb(h, 0.5, 1.0)
+        hexCode = rgbToHex(r, g, b)
+        baseColors.append(hexCode)
+        headers.append(f'Hue {round(hueDegree)}°')
+
+    return baseColors, headers
+
+
+def generateColorGradientCsv(outPath, brightenSteps, darkenSteps, baseColors, csvHeaders, csvName):
     allColumns = []
 
     for base in baseColors:
@@ -191,30 +200,37 @@ def generateColorGradientCsv(logFile, outPath, brightenSteps, darkenSteps, baseC
             for row in csvRows:
                 writer.writerow(row)
 
-        logMsg(logFile, f'[SUCCESS] CSV file written to "{csvFilePath}".', True)
+        LOG(f'[SUCCESS] CSV file written to "{csvFilePath}".', True)
     except Exception as e:
-        logMsg(logFile, f'[ERROR] Failed to write CSV: {str(e)}', True)
+        LOG(f'[ERROR] Failed to write CSV: {str(e)}', True)
 
 
 if __name__ == '__main__':
     # Create log file first so we can log even if any script functions fail early.
     logFile = getNextLogFilePath(LOG_PATH, LOG_NAME)
+    LOG = createLogger(logFile)
 
     try:
-        logMsg(logFile, f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
+        LOG(f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
 
-        generateColorGradientCsv(logFile, OUTPUT_PATH, BRIGHTEN_NUM, DARKEN_NUM, BASE_COLORS, CSV_HEADERS, CSV_NAME)
+        # Generate 50 evenly spaced base colors
+        BASE_COLORS, CSV_HEADERS = generateBaseHues(HUE_STEPS)
 
-        logMsg(logFile, f'\nLogs saved to "{logFile.replace("\\", "/")}".', True)
-        logMsg(logFile, f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        generateColorGradientCsv(OUTPUT_PATH, BRIGHTEN_NUM, DARKEN_NUM, BASE_COLORS, CSV_HEADERS, CSV_NAME)
+
+        if USE_LOG_FILE:
+            LOG(f'\nLogs saved to "{logFile.replace("\\", "/")}"', True)
+            LOG(f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        else:
+            LOG(f'\n[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
     except KeyboardInterrupt:
         err = '[ERROR] Script interrupted by user (KeyboardInterrupt / CTRL+C).\n'
         trace = traceback.format_exc()
-        logMsg(logFile, err + trace, True)
+        LOG(err + trace, True)
     except Exception:
         err = '[ERROR] Unhandled Exception:\n'
         trace = traceback.format_exc()
-        logMsg(logFile, err + trace, True)
+        LOG(err + trace, True)
     finally:
-        logMsg(logFile, f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        LOG(f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
 

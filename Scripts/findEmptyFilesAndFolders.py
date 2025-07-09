@@ -1,17 +1,27 @@
-# Run by:  python templateUsingOS.py
+# Run by:  python findEmptyFilesAndFolders.py
+# Finds all Folders and Files in a given INPUT_PATH that are empty and lists them in a txt file.
+# Has the option to toggle on and delete the same files/folders that are empty and move them to the recycling bin.
 
 # Imports
 import os
 import traceback
 from datetime import datetime
+from send2trash import send2trash
 
 
 #! ==========<  CONFIG  >==========
 # Set the path to scan (recursively?).
 INPUT_PATH = r"C:\Path\To\Folder"
 
-# Set the output path.
-OUTPUT_PATH = r"C:\Path\To\Folder"
+#! Toggle this to delete (True) or not delete (False) empty files and/or folders.
+# Does not permanently delete. Should always move files to recycling bin so you can restore just in case.
+DELETE_EMPTY = False
+
+# Set output path and file name.
+# OUTPUT_PATH NOTE: Allows absolute and relative folder paths. Examples: 'Output', './Output', '../Output', or 'D:/Output/'. All are valid.
+# OUTPUT_PATH NOTE: Set to None or '' to not have save file to any folder. It will just save the file to the same folder as the script.
+OUTPUT_PATH = 'Output'
+OUTPUT_NAME = 'EmptyFilesAndFolders.txt'
 
 # Set the log file config.
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
@@ -19,7 +29,7 @@ OUTPUT_PATH = r"C:\Path\To\Folder"
 # LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
 USE_LOG_FILE = True  #! Enable or disable log file saving entirely.
 LOG_PATH = 'Logs'
-LOG_NAME = 'LogFile.txt'
+LOG_NAME = 'findEmptyFilesAndFolders.txt'
 
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
@@ -74,22 +84,80 @@ def createLogger(logFile):
     return lambda msg, printMsg=False, skipLogFile=False: logMsg(msg, printMsg, logFile, skipLogFile)
 
 
+def getNextOutputFilePath(outFolder, outFileName):
+    if outFolder:
+        outPath = os.path.abspath(outFolder)
+    else:
+        outPath = os.path.dirname(os.path.abspath(__file__))
+
+    os.makedirs(outPath, exist_ok=True)
+    baseName, ext = os.path.splitext(outFileName)
+    fileNumber = 1
+
+    while True:
+        fileName = f'{baseName}_{fileNumber}{ext}'
+        fullOutPath = os.path.join(outPath, fileName)
+
+        if not os.path.exists(fullOutPath):
+            return fullOutPath
+
+        fileNumber += 1
 
 
-def mainExample(inPath, outPath):
-    LOG('Start of mainExample() function.', True)
-    LOG('Common script stuff here and a log or two...', True)
+def findEmptyFolders(directory):
+    emptyFolders = []
+    for root, dirs, files in os.walk(directory, topdown=False):
+        if not files and all(os.path.join(root, d) in emptyFolders for d in dirs):
+            emptyFolders.append(root)
 
-    LOG('This will only print to the console but not the log file (if using one)', True, True)
-    LOG('This will only print to the log file (if using one) but not console', False)
+    return emptyFolders
 
-    if inPath:
-        LOG(f'Here is your input path: {inPath}')
 
-    if outPath:
-        LOG(f'Here is your output path: {outPath}')
+def findEmptyFiles(directory):
+    emptyFiles = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            path = os.path.join(root, file)
 
-    LOG('End of mainExample() function.', True)
+            if os.path.getsize(path) == 0:
+                emptyFiles.append(path)
+
+    return emptyFiles
+
+
+def writeToFile(filePath, data):
+    with open(filePath, 'w', encoding='utf-8') as f:
+        for item in data:
+            f.write(item.replace('\\', '/') + '\n')
+
+
+def deleteItems(paths, label):
+    for path in paths:
+        try:
+            send2trash(path)
+            LOG(f'Deleted {label}: {path}', True)
+        except (PermissionError, FileNotFoundError, OSError) as e:
+            LOG(f'Error deleting {label}: {path} — {getattr(e, "strerror", str(e))}', True)
+
+
+def mainScanAndDelete(inPath, outPath, outName, deleteEmpty=False):
+    LOG(f'[INFO] Scanning: {inPath}', True)
+
+    emptyFolders = findEmptyFolders(inPath)
+    emptyFiles = findEmptyFiles(inPath)
+    allEmpty = emptyFolders + emptyFiles
+
+    # Determine where to save results.
+    outFilePath = getNextOutputFilePath(outPath, outName)
+
+    writeToFile(outFilePath, allEmpty)
+    LOG(f'[INFO] Saved results to: {outFilePath}', True)
+
+    # Optionally delete.
+    if deleteEmpty:
+        deleteItems(emptyFiles, 'file')
+        deleteItems(sorted(emptyFolders, reverse=True), 'folder')
+
 
 
 if __name__ == '__main__':
@@ -100,8 +168,7 @@ if __name__ == '__main__':
     try:
         LOG(f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
 
-        # Run the main script function.
-        mainExample(INPUT_PATH, OUTPUT_PATH)
+        mainScanAndDelete(INPUT_PATH, OUTPUT_PATH, OUTPUT_NAME, DELETE_EMPTY)
 
         if USE_LOG_FILE:
             LOG(f'\nLogs saved to "{logFile.replace("\\", "/")}"', True)

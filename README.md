@@ -19,6 +19,9 @@ There are no strict plans for this repo, but various features and tooling may be
 ## 1⃣ Python Formatting & Structure Standards <a name="python-formatting-and-structure-standards"></a>
 These guidelines define the preferred formatting and structure for all scripts in this repository.
 
+> [!IMPORTANT]
+> The formatting and structural conventions in this repo reflect a consistent personal standard developed for solo scripting workflows.
+
 ### 1. General Rules
 - Global variables use `UPPERCASE_SNAKE_CASE`.
 - Use single quotes (`'`) for all strings unless double quotes are required (e.g. to avoid escaping single quotes or within format strings).
@@ -29,6 +32,7 @@ These guidelines define the preferred formatting and structure for all scripts i
 - Use `PascalCase` for class names.
 - Encapsulate all executable logic within functions. Avoid top-level statements like `for`, `if`, or `try` outside functions.
 - Prefer `Path` over `Dir` or `Directory` in variable names, unless clarity requires otherwise.
+- Type annotations are optional in single-file or personal scripts, where function usage is fully controlled and understood. For larger, multi-file projects, type hints are recommended to improve clarity and maintainability.
 
 ### 2. Commenting Rules
 - Comments should provide context, even if not full sentences.
@@ -65,8 +69,7 @@ These guidelines define the preferred formatting and structure for all scripts i
       - Another control statement (`while`, `with`, `for`, `if`, `try`), or
       - A comment (`# Comment...`),
     - Then insert **one empty line above**.
-      > [!IMPORTANT]
-      > If the line before is a comment (# ), check whether the line before that is also a control statement. If not, insert one empty line before the comment.
+      - **NOTE:** If the line before is a comment (# ), check whether the line before that is also a control statement. If not, insert one empty line before the comment.
   - **`return` Statements**
     - Insert a **single empty line above** any return, unless the line directly before it is a:
       - `class`, `def`, `while`, `with`, `for`, `if`, `try`
@@ -121,12 +124,16 @@ OUTPUT_PATH = r""
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
 #           Set to None or '' to save the log in the same directory as this script.
 # LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
+USE_LOG_FILE = True  #! Enable or disable log file saving entirely.
 LOG_PATH = 'Logs'
 LOG_NAME = 'LogFile.txt'
 
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
 if CLEAR_CONSOLE: os.system('cls' if os.name == 'nt' else 'clear')
+
+# Enables global use of LOG() without needing to pass createLogger() or logFile between functions.
+LOG = lambda *args, **kwargs: None
 #! ================================
 
 
@@ -145,25 +152,29 @@ from datetime import datetime
 if __name__ == '__main__':
     # Create log file first so we can log even if any script functions fail early.
     logFile = getNextLogFilePath(LOG_PATH, LOG_NAME)
+    LOG = createLogger(logFile)
 
     try:
-        logMsg(logFile, f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
+        LOG(f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
 
         # Run the main script function.
-        mainExample(logFile, INPUT_PATH, OUTPUT_PATH)
+        mainExample(INPUT_PATH, OUTPUT_PATH)
 
-        logMsg(logFile, f'\nLogs saved to "{logFile.replace("\\", "/")}".', True)
-        logMsg(logFile, f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        if USE_LOG_FILE:
+            LOG(f'\nLogs saved to "{logFile.replace("\\", "/")}"', True)
+            LOG(f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        else:
+            LOG(f'\n[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
     except KeyboardInterrupt:
         err = '[ERROR] Script interrupted by user (KeyboardInterrupt / CTRL+C).\n'
         trace = traceback.format_exc()
-        logMsg(logFile, err + trace, True)
+        LOG(err + trace, True)
     except Exception:
-        err = '[ERROR] Unhandled Exception:\n'
+        err = f'[ERROR] Unhandled Exception at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}:\n'
         trace = traceback.format_exc()
-        logMsg(logFile, err + trace, True)
+        LOG(err + trace, True)
     finally:
-        logMsg(logFile, f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        LOG(f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
 ```
 
 ### 4. Log Helpers
@@ -173,6 +184,10 @@ Typically placed after the config block:
 
 
 def getNextLogFilePath(logFolder, logFileName):
+    # Skip creating log path if logging is disabled.
+    if not USE_LOG_FILE:
+        return None
+
     if logFolder:
         logPath = os.path.abspath(logFolder)
     else:
@@ -192,15 +207,24 @@ def getNextLogFilePath(logFolder, logFileName):
         logNumber += 1
 
 
-def logMsg(logFile, msg, printMsg=False, skipLogFile=False):
+def logMsg(msg, printMsg=False, logFile=None, skipLogFile=False):
     # Optional: Print to console (default: False).
     if printMsg:
         print(msg)
 
     # Optional: Skip log file (default: False).
-    if not skipLogFile:
-        with open(logFile, 'a', encoding='utf-8') as log:
-            log.write(msg + '\n')
+    if USE_LOG_FILE and not skipLogFile and logFile:
+        with open(logFile, 'a', encoding='utf-8') as f:
+            f.write(msg + '\n')
+
+
+def createLogger(logFile):
+    """
+    Returns a logging function with the given log file pre-attached.
+    This allows using LOG(msg) globally without passing the log file into every call.
+    Respects USE_LOG_FILE automatically.
+    """
+    return lambda msg, printMsg=False, skipLogFile=False: logMsg(msg, printMsg, logFile, skipLogFile)
 ```
 
 ### 5. VS-Code: Better Comments (Optional)
@@ -242,9 +266,7 @@ Use for incoming data, files, or user-provided sources. Prefer `inputFile`, `inp
 - `input`, `inputPath`, `inputFile`, `inputDir`, `inputFolder`, `inputFilename`, `inputDirectoryPath`, `inPath`, `sourcePath`, `sourceFile`
 
 > [!TIP]
-> `source` is useful as a synonym when "input" starts to feel repetitive.
-
-> [!TIP]
+> `source` is useful as a synonym when "input" starts to feel repetitive.<br>
 > Reserve `inputFile`, `inputPath`, or `inPath` for values used *only for reading*. Avoid overloading them later for derived or output-related paths.
 
 > **Debugging Tip:** Prefixing with `in*` makes it easy to know the direction of data.
@@ -259,10 +281,9 @@ Use for processed results, files to be saved, etc.
 - `output`, `outputPath`, `outputFile`, `outputDir`, `outputFolder`, `outputFilename`, `outPath`, `savePath`, `exportPath`, `resultFile`
 
 > [!TIP]
-> `exportPath` or `savePath` work well in UIs or CLI tools when output is user-defined.
-
-> [!TIP]
+> `exportPath` or `savePath` work well in UIs or CLI tools when output is user-defined.<br>
 > Start generic like `outputPath`, but allow variation (`outPath`, `savePath`, `exportPath`) for clarity in deeper functions.
+
 
 > **Debugging Tip:** A naming ladder (`outputPath → savePath → writePath`) helps track file evolution.
 
@@ -276,9 +297,7 @@ Use when dealing explicitly with directories (rather than files).
 - `folderPath`, `dirPath`, `outputDir`, `inputDir`, `workingDir`, `targetDir`, `tempDir`, `logDir`, `rootDir`, `baseDir`
 
 > [!TIP]
-> prefer `Dir` or `Folder` consistently. In most codebases, `Dir` is preferred for brevity.
-
-> [!TIP]
+> prefer `Dir` or `Folder` consistently. In most codebases, `Dir` is preferred for brevity.<br>
 > Use `dir`, `folder`, and `directory` consistently across the script.
 
 > **Debugging Tip:** Consider prefixes like `tempDir`, `cacheDir`, `logDir` to imply purpose.
@@ -293,9 +312,7 @@ Use when the value is clearly a file path or name.
 - `filePath`, `inputFile`, `outputFile`, `targetFile`, `configFile`, `logFile`, `fileName`, `fileStem`, `fileExt`, `dataFile`
 
 > [!TIP]
-> `fileStem` = name without extension, `fileExt` = extension (e.g. `.txt`).
-
-> [!TIP]
+> `fileStem` = name without extension, `fileExt` = extension (e.g. `.txt`).<br>
 > Reserve `fileName` or `fileStem` for filename-only (no path). Use `filePath` when including path.
 
 > **Debugging Tip:** Tracking file extensions separately (`fileExt`) can simplify validation.
@@ -338,9 +355,7 @@ Use for deriving filenames or directory components, e.g., `os.path.splitext`.
 - `baseName`, `fileStem`, `baseFileName`, `baseOutput`, `baseDir`, `basePath`, `outputBaseName`, `targetBaseName`
 
 > [!TIP]
-> `baseName` often refers to the filename without path (e.g. `os.path.basename`) while `fileStem` usually refers to the name without the extension.
-
-> [!TIP]
+> `baseName` often refers to the filename without path (e.g. `os.path.basename`) while `fileStem` usually refers to the name without the extension.<br>
 > Use only for components (like when splitting files, not full paths).
 
 > **Debugging Tip:** Don't overuse `base*`; keep it tied to *derivation* (stem, name, directory).

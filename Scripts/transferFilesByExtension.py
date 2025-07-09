@@ -37,16 +37,24 @@ MODE = 4
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
 #           Set to None or '' to save the log in the same directory as this script.
 # LOG_NAME: File name for the log. Automatically increments to avoid overwriting existing files.
+USE_LOG_FILE = True  #! Enable or disable log file saving entirely.
 LOG_PATH = 'Logs'
 LOG_NAME = 'transferFilesByExtension.txt'
 
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
 if CLEAR_CONSOLE: os.system('cls' if os.name == 'nt' else 'clear')
+
+# Enables global use of LOG() without needing to pass createLogger() or logFile between functions.
+LOG = lambda *args, **kwargs: None
 #! ================================
 
 
 def getNextLogFilePath(logFolder, logFileName):
+    # Skip creating log path if logging is disabled.
+    if not USE_LOG_FILE:
+        return None
+
     if logFolder:
         logPath = os.path.abspath(logFolder)
     else:
@@ -66,15 +74,24 @@ def getNextLogFilePath(logFolder, logFileName):
         logNumber += 1
 
 
-def logMsg(logFile, msg, printMsg=False, skipLogFile=False):
+def logMsg(msg, printMsg=False, logFile=None, skipLogFile=False):
     # Optional: Print to console (default: False).
     if printMsg:
             print(msg)
 
     # Optional: Skip log file (default: False).
-    if not skipLogFile:
-        with open(logFile, 'a', encoding='utf-8') as log:
-            log.write(msg + '\n')
+    if USE_LOG_FILE and not skipLogFile and logFile:
+        with open(logFile, 'a', encoding='utf-8') as f:
+            f.write(msg + '\n')
+
+
+def createLogger(logFile):
+    """
+    Returns a logging function with the given log file pre-attached.
+    This allows using LOG(msg) globally without passing the log file into every call.
+    Respects USE_LOG_FILE automatically.
+    """
+    return lambda msg, printMsg=False, skipLogFile=False: logMsg(msg, printMsg, logFile, skipLogFile)
 
 
 def gatherFileStats(inputPath, extensions):
@@ -96,25 +113,25 @@ def gatherFileStats(inputPath, extensions):
 
 
 def printSummary(extensionCounts):
-    logMsg(logFile, 'Extension Summary:', True)
+    LOG('Extension Summary:', True)
 
     for ext in EXTENSIONS:
         count = extensionCounts.get(ext, 0)
-        logMsg(logFile, f'  - {ext} -- Found {count} file{"s" if count != 1 else ""} with this extension in the input folder.', True)
+        LOG(f'  - {ext} -- Found {count} file{"s" if count != 1 else ""} with this extension in the input folder.', True)
 
     total = sum(extensionCounts.values())
-    logMsg(logFile, '', True)
+    LOG('', True)
 
     if total == 0:
-        logMsg(logFile, f'No files found with the given extension{"s" if len(EXTENSIONS) > 1 else ""}, exiting program.', True)
+        LOG(f'No files found with the given extension{"s" if len(EXTENSIONS) > 1 else ""}, exiting program.', True)
     else:
         action = 'moving' if MODE in (1, 2) else 'copying'
-        logMsg(logFile, f'Now {action} {total} file{"s" if total != 1 else ""}...\n', True)
+        LOG(f'Now {action} {total} file{"s" if total != 1 else ""}...\n', True)
 
     return total
 
 
-def transferFlat(logFile, inputPath, outputPath, extensions, mode, extensionCounts, showProgCt):
+def transferFlat(inputPath, outputPath, extensions, mode, extensionCounts, showProgCt):
     # Transfers matching files to OUTPUT_PATH in a flat structure (no folders preserved).
 
     for ext in extensions:
@@ -123,7 +140,7 @@ def transferFlat(logFile, inputPath, outputPath, extensions, mode, extensionCoun
         if count == 0:
             continue
 
-        logMsg(logFile, f'Starting Extension {ext} - {count}:', True)
+        LOG(f'Starting Extension {ext} - {count}:', True)
 
         fileCounter = 0
         paddingWidth = len(str(count))
@@ -155,22 +172,22 @@ def transferFlat(logFile, inputPath, outputPath, extensions, mode, extensionCoun
                     shutil.move(src, destination)
                     if showProgCt:
                         padding = ' ' * len(countOutOf)
-                        logMsg(logFile, f'\t{countOutOf} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{countOutOf} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
                     else:
                         padding = ' ' * paddingWidth
-                        logMsg(logFile, f'\t{paddedNum} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{paddedNum} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
                 elif mode == 3:
                     # Mode 3: Copy files to temp folder.
                     shutil.copy(src, destination)
                     if showProgCt:
                         padding = ' ' * len(countOutOf)
-                        logMsg(logFile, f'\t{countOutOf} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{countOutOf} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
                     else:
                         padding = ' ' * paddingWidth
-                        logMsg(logFile, f'\t{paddedNum} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{paddedNum} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
 
 
-def transferWithStructure(logFile, inputPath, outputPath, extensions, mode, extensionCounts, showProgCt):
+def transferWithStructure(inputPath, outputPath, extensions, mode, extensionCounts, showProgCt):
     # Transfers matching files to OUTPUT_PATH while preserving original folder structure.
 
     for ext in extensions:
@@ -179,7 +196,7 @@ def transferWithStructure(logFile, inputPath, outputPath, extensions, mode, exte
         if count == 0:
             continue
 
-        logMsg(logFile, f'Starting Extension {ext} - {count}:', True)
+        LOG(f'Starting Extension {ext} - {count}:', True)
 
         fileCounter = 0
         paddingWidth = len(str(count))
@@ -205,19 +222,19 @@ def transferWithStructure(logFile, inputPath, outputPath, extensions, mode, exte
                     shutil.move(src, destination)
                     if showProgCt:
                         padding = ' ' * len(countOutOf)
-                        logMsg(logFile, f'\t{countOutOf} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{countOutOf} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
                     else:
                         padding = ' ' * paddingWidth
-                        logMsg(logFile, f'\t{paddedNum} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{paddedNum} Moved: {src}\n\t{padding} To ->   {destination}\n', True)
                 elif mode == 4:
                     # Mode 4: Copy files to temp folder, maintaining structure.
                     shutil.copy(src, destination)
                     if showProgCt:
                         padding = ' ' * len(countOutOf)
-                        logMsg(logFile, f'\t{countOutOf} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{countOutOf} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
                     else:
                         padding = ' ' * paddingWidth
-                        logMsg(logFile, f'\t{paddedNum} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
+                        LOG(f'\t{paddedNum} Copied: {src}\n\t{padding} To ->   {destination}\n', True)
 
 
 if __name__ == '__main__':
@@ -225,7 +242,7 @@ if __name__ == '__main__':
     logFile = getNextLogFilePath(LOG_PATH, LOG_NAME)
 
     try:
-        logMsg(logFile, f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
+        LOG(f'[START] Script started at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.\n', True)
 
         os.makedirs(OUTPUT_PATH, exist_ok=True)
         extensionCounts = gatherFileStats(INPUT_PATH, EXTENSIONS)
@@ -237,24 +254,27 @@ if __name__ == '__main__':
         if MODE == 1 or MODE == 3:
             # Mode 1: Move files to temp folder.
             # Mode 3: Copy files to temp folder.
-            transferFlat(logFile, INPUT_PATH, OUTPUT_PATH, EXTENSIONS, MODE, extensionCounts, SHOW_PROGRESS_NUMBERS)
+            transferFlat(INPUT_PATH, OUTPUT_PATH, EXTENSIONS, MODE, extensionCounts, SHOW_PROGRESS_NUMBERS)
         elif MODE == 2 or MODE == 4:
             # Mode 2: Move files to temp folder, maintaining structure.
             # Mode 4: Copy files to temp folder, maintaining structure.
-            transferWithStructure(logFile, INPUT_PATH, OUTPUT_PATH, EXTENSIONS, MODE, extensionCounts, SHOW_PROGRESS_NUMBERS)
+            transferWithStructure(INPUT_PATH, OUTPUT_PATH, EXTENSIONS, MODE, extensionCounts, SHOW_PROGRESS_NUMBERS)
         else:
-            logMsg(logFile, 'Invalid MODE', True)
+            LOG('Invalid MODE', True)
 
-        logMsg(logFile, f'\nLogs saved to "{logFile.replace("\\", "/")}".', True)
-        logMsg(logFile, f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        if USE_LOG_FILE:
+            LOG(f'\nLogs saved to "{logFile.replace("\\", "/")}"', True)
+            LOG(f'[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        else:
+            LOG(f'\n[END] Script completed at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
     except KeyboardInterrupt:
         err = '[ERROR] Script interrupted by user (KeyboardInterrupt / CTRL+C).\n'
         trace = traceback.format_exc()
-        logMsg(logFile, err + trace, True)
+        LOG(err + trace, True)
     except Exception:
         err = '[ERROR] Unhandled Exception:\n'
         trace = traceback.format_exc()
-        logMsg(logFile, err + trace, True)
+        LOG(err + trace, True)
     finally:
-        logMsg(logFile, f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+        LOG(f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
 
