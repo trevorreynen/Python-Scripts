@@ -9,7 +9,7 @@ from datetime import datetime
 
 #! ==========<  CONFIG  >==========
 # Set the directory to scan. For DIRECTORY, must change the back slashes to forward slashes.
-DIRECTORY = "C:/Path/To/Folder"
+DIRECTORY = ""
 # DIRECTORY_WINDOWS: Allows simple quick copy/paste from windows file explore. Prioritized over DIRECTORY if both valid paths.
 DIRECTORY_WINDOWS = r"C:\Path\To\Folder"
 
@@ -31,25 +31,36 @@ OUTPUT_PATH = 'Output'
 OUTPUT_NAME = 'TreeStructure.txt'
 
 
+# NOTE for IGNORE_LIST & ONLY_SELECT_LIST: Options: 'folder', 'file' (value can be file w/ extension or without), 'ext' OR 'extension'
 # Define the list of folders and files to ignore.
 IGNORE_LIST = [
-    '__pycache__',
-    'node_modules',
-    'ignored_file.txt',
-    '.git',
+    { 'folder': '__pycache__' },
+    { 'folder': 'node_modules' },
+    { 'file': 'ignored_file.txt' },
+    { 'folder': '.git' },
+
+    { 'folder': 'Windows' },             # C:/Windows/
+    { 'folder': 'ProgramData' },         # C:/ProgramData/
+    { 'folder': 'Program Files' },       # C:/Program Files/
+    { 'folder': 'Program Files (x86)' }, # C:/Program Files (x86)/
+    { 'folder': '$Recycle.Bin' },        # C:/$Recycle.Bin/         (assumed)
+    { 'folder': 'Recovery' },            # C:/Recovery/             (assumed)
+
+    { 'folder': 'Programs' },            # C:/Programs/
+
+    { 'folder': 'All Users' },           # C:/Users/All Users/
+    { 'folder': 'Default' },             # C:/Users/Default/
+    { 'folder': 'Public' },              # C:/Users/Public/
+
+    { 'folder': '.vscode' },             # C:/Users/<User>/.vscode/
+    { 'folder': 'AppData' },             # C:/Users/<User>/AppData/
 ]
 
 # Define a list of folders, files, and/or extensions to select specifically.
+# NOTE: All of ONLY_SELECT must be true. If you specify a folder, only things inside that folder will be "noticed" otherwise it wont find all other files or extensions in other folders.
 ONLY_SELECT_LIST = [
-    # 'main.py',
-    # '.txt',
+    #{ 'extension': '.py' },
 ]
-
-# Separate ignore rules and select rules.
-IGNORE_NAMES = set(i for i in IGNORE_LIST if not i.startswith('.'))
-IGNORE_EXTENSIONS = set(i.lower() for i in IGNORE_LIST if i.startswith('.'))
-ONLY_SELECT_NAMES = set(i for i in ONLY_SELECT_LIST if not i.startswith('.'))
-ONLY_SELECT_EXTENSIONS = set(i.lower() for i in ONLY_SELECT_LIST if i.startswith('.'))
 
 
 # Set the log file config.
@@ -78,6 +89,29 @@ if 'DIRECTORY_WINDOWS' in locals() and DIRECTORY_WINDOWS:
 elif 'DIRECTORY' in locals() and DIRECTORY:
     SELECT_PATH = DIRECTORY
 if not SELECT_PATH: raise ValueError('No valid directory path provided.')
+
+# Separate ignore rules and select rules.
+IGNORE_FOLDERS = set()
+IGNORE_FILES = set()
+IGNORE_EXTS = set()
+ONLY_FOLDERS = set()
+ONLY_FILES = set()
+ONLY_EXTS = set()
+for item in IGNORE_LIST:
+    if 'folder' in item:
+        IGNORE_FOLDERS.add(item['folder'])
+    elif 'file' in item:
+        IGNORE_FILES.add(item['file'])
+    elif 'ext' in item or 'extension' in item:
+        IGNORE_EXTS.add(item.get('ext') or item.get('extension'))
+
+for item in ONLY_SELECT_LIST:
+    if 'folder' in item:
+        ONLY_FOLDERS.add(item['folder'])
+    elif 'file' in item:
+        ONLY_FILES.add(item['file'])
+    elif 'ext' in item or 'extension' in item:
+        ONLY_EXTS.add(item.get('ext') or item.get('extension'))
 #! ================================
 
 
@@ -176,24 +210,37 @@ def getClusterAwareDiskSize(filePath, clusterSize):
     return ((reportedSize + clusterSize - 1) // clusterSize) * clusterSize
 
 
-def isSelected(item):
-    if not ONLY_SELECT_NAMES and not ONLY_SELECT_EXTENSIONS:
+def isSelected(item, path=None):
+    isFolder = os.path.isdir(path) if path else False
+
+    # If there are no ONLY_* rules, allow everything.
+    if not ONLY_FOLDERS and not ONLY_FILES and not ONLY_EXTS:
         return True
 
-    if item in ONLY_SELECT_NAMES:
+    # Allow all folders if no folder restriction is defined.
+    if isFolder:
+        return True if not ONLY_FOLDERS else item in ONLY_FOLDERS
+
+    # File match (full name or ext).
+    if item in ONLY_FILES:
         return True
 
-    if any(item.lower().endswith(ext) for ext in ONLY_SELECT_EXTENSIONS):
+    if any(item.lower().endswith(ext) for ext in ONLY_EXTS):
         return True
 
     return False
 
 
-def isIgnored(item):
-    if item in IGNORE_NAMES:
+def isIgnored(item, path=None):
+    isFolder = os.path.isdir(path) if path else False
+
+    if isFolder and item in IGNORE_FOLDERS:
         return True
 
-    if any(item.lower().endswith(ext) for ext in IGNORE_EXTENSIONS):
+    if not isFolder and item in IGNORE_FILES:
+        return True
+
+    if not isFolder and any(item.lower().endswith(ext) for ext in IGNORE_EXTS):
         return True
 
     return False
@@ -203,23 +250,26 @@ def getFolderInfoTrueDiskUsage(path):
     fileCount = 0
     byteSizeSum = 0
     diskSizeSum = 0
-    clusterSize = getClusterSize(path)
 
     try:
+        clusterSize = getClusterSize(path)
         entries = os.listdir(path)
     except Exception as e:
-        LOG(f'Error accessing {path}: {e}', True)
+        LOG(f'[ACCESS ERROR] Cannot read {path} - {e}', True)
         return 0, 0, 0
 
     for entry in entries:
         fullPath = os.path.join(path, entry)
 
-        if os.path.isfile(fullPath) and isSelected(entry) and not isIgnored(entry):
-            actualBytes = os.path.getsize(fullPath)
-            diskBytes = getClusterAwareDiskSize(fullPath, clusterSize)
-            byteSizeSum += actualBytes
-            diskSizeSum += diskBytes
-            fileCount += 1
+        if os.path.isfile(fullPath) and isSelected(entry, fullPath) and not isIgnored(entry, fullPath):
+            try:
+                actualBytes = os.path.getsize(fullPath)
+                diskBytes = getClusterAwareDiskSize(fullPath, clusterSize)
+                byteSizeSum += actualBytes
+                diskSizeSum += diskBytes
+                fileCount += 1
+            except Exception as e:
+                LOG(f'[SIZE ERROR] {fullPath} - {e}', True)
 
     return fileCount, byteSizeSum, diskSizeSum
 
@@ -250,14 +300,18 @@ def walkTree(directory, ignoreList, scanFiles=False):
         nonlocal maxLineLength
 
         # Filter items based on scanFiles flag.
-        raw = sorted(os.listdir(dirPath))
+        try:
+            raw = sorted(os.listdir(dirPath))
+        except Exception as e:
+            LOG(f'[SKIPPED] {dirPath} - {e}', True)
+            return  # Skip this folder.
 
         if scanFiles:
-            filtered = [i for i in raw if isSelected(i) and not isIgnored(i)]
+            filtered = [i for i in raw if isSelected(i, os.path.join(dirPath, i)) and not isIgnored(i, os.path.join(dirPath, i))]
             filtered.sort(key=lambda item: (not os.path.isdir(os.path.join(dirPath, item)), item))
             items = filtered
         else:
-            items = [i for i in raw if isSelected(i) and not isIgnored(i) and os.path.isdir(os.path.join(dirPath, i))]
+            items = [i for i in raw if isSelected(i, os.path.join(dirPath, i)) and not isIgnored(i, os.path.join(dirPath, i)) and os.path.isdir(os.path.join(dirPath, i))]
 
         # Iterate through items to construct the tree structure.
         for index, item in enumerate(items):
@@ -342,11 +396,17 @@ def generateTree(directory, ignoreList, scanFiles=False):
 def buildSimpleTree(path, ignoreList, includeFiles, prefix=''):
     # Sort directories first, then files. Ignore folders/files in ignoreList.
 
+    try:
+        entries = os.listdir(path)
+    except Exception as e:
+        LOG(f'[SKIPPED] {path} - {e}', True)
+        return  # Skip this folder completely.
+
     items = sorted(
         [
-            i for i in os.listdir(path)
-            if isSelected(i)
-            and not isIgnored(i)
+            i for i in entries
+            if isSelected(i, os.path.join(path, i))
+            and not isIgnored(i, os.path.join(path, i))
             and (includeFiles or os.path.isdir(os.path.join(path, i)))
         ],
         key=lambda item: (not os.path.isdir(os.path.join(path, item)), item)
@@ -456,3 +516,4 @@ if __name__ == '__main__':
         LOG(err + trace, True)
     finally:
         LOG(f'[FINAL] Script exited at {datetime.now().strftime("%m/%d/%y %I:%M:%S %p")}.', True)
+

@@ -16,6 +16,9 @@ from datetime import datetime
 # Set path to input path root.
 INPUT_PATH = r"C:\Path\To\Folder"
 
+# Toggle renaming functionality. If False, only logs size/count info per folder.
+RENAME_FILES = False
+
 # Set the log file config.
 # LOG_PATH: Folder to save logs. Supports both absolute and relative paths — e.g. 'Logs', './Logs', '../Logs', or 'D:/Logs/'.
 #           Set to None or '' to save the log in the same directory as this script.
@@ -60,7 +63,7 @@ def getNextLogFilePath(logFolder, logFileName):
 def logMsg(msg, printMsg=False, logFile=None, skipLogFile=False):
     # Optional: Print to console (default: False).
     if printMsg:
-        print(logFile, msg)
+        print(msg)
 
     # Optional: Skip log file (default: False).
     if USE_LOG_FILE and not skipLogFile and logFile:
@@ -120,7 +123,7 @@ def getTrueSizeOnDisk(filePath, clusterSize):
     return ((actualSize + clusterSize - 1) // clusterSize) * clusterSize
 
 
-def getFolderInfoTrueDiskUsage(logFile, path):
+def getFolderInfoTrueDiskUsage(path):
     fileCount = 0
     totalAllocated = 0
     clusterSize = getClusterSize(path)
@@ -138,8 +141,6 @@ def getFolderInfoTrueDiskUsage(logFile, path):
 
 
 def main(inPath):
-    LOG(f'\nRenaming folders in: {inPath}\n', True)
-
     # Accumulate true on-disk size (accounts for filesystem block usage, not just file byte size).
     for folder in os.listdir(inPath):
         folderPath = os.path.join(inPath, folder)
@@ -149,15 +150,18 @@ def main(inPath):
             fileCountStr = formatNumber(fileCount)
             sizeStr = formatFileSize(totalBytes)
 
-            newName = f'{folder} ({fileCountStr} Files, {sizeStr})'
-            newPath = os.path.join(inPath, newName)
+            if RENAME_FILES:
+                newName = f'{folder} ({fileCountStr} Files, {sizeStr})'
+                newPath = os.path.join(inPath, newName)
 
-            try:
-                # Final folder name format: OriginalName (3 Files, 2.71 MB).
-                os.rename(folderPath, newPath)
-                LOG(f'Renamed: {folder} → {newName}', True)
-            except Exception as e:
-                LOG(f'Failed to rename {folder}: {e}', True)
+                try:
+                    # Final folder name format: OriginalName (3 Files, 2.71 MB).
+                    os.rename(folderPath, newPath)
+                    LOG(f'Renamed: {folder} → {newName}', True)
+                except Exception as e:
+                    LOG(f'Failed to rename {folder}: {e}', True)
+            else:
+                LOG(f'{folder} → {fileCountStr} Files, {sizeStr}', True)
 
 
 if __name__ == '__main__':
