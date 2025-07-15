@@ -102,7 +102,7 @@ def getFileSize(filePath):
 def printDynamicConsole(totalFiles, completedFiles, currentFile, convertingFileStats):
     os.system('cls' if os.name == 'nt' else 'clear')
 
-    print(f'Total AVI files to process: {totalFiles}\n')
+    print(f'Total MKV files to process: {totalFiles}\n')
     print('Files Complete:')
 
     for index, info in enumerate(completedFiles, 1):

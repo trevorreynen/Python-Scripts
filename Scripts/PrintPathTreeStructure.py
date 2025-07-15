@@ -18,11 +18,14 @@ DIRECTORY_WINDOWS = r"C:\Path\To\Folder"
 SCAN_FILES = True
 
 #! Toggle this True/False to show or hide file sizes.
-SHOW_FILE_SIZE = False
+SHOW_FILE_SIZE = True
 
 #! Toggle this True/False to show root folder name or not inside the tree structure.
 SHOW_ROOT_FOLDER = True
 
+# Num of folders to search deep into given input path (0=full recursive, 1=just folders/files of input path, 2=folder/files of input path and their children but not deeper, 3=3 folders deep maximum)
+DEPTH_SEARCH = 0
+DEBUG = False
 
 # Set output path and file name.
 # OUTPUT_PATH NOTE: Allows absolute and relative folder paths. Examples: 'Output', './Output', '../Output', or 'D:/Output/'. All are valid.
@@ -39,21 +42,24 @@ IGNORE_LIST = [
     { 'file': 'ignored_file.txt' },
     { 'folder': '.git' },
 
-    { 'folder': 'Windows' },             # C:/Windows/
-    { 'folder': 'ProgramData' },         # C:/ProgramData/
-    { 'folder': 'Program Files' },       # C:/Program Files/
-    { 'folder': 'Program Files (x86)' }, # C:/Program Files (x86)/
-    { 'folder': '$Recycle.Bin' },        # C:/$Recycle.Bin/         (assumed)
-    { 'folder': 'Recovery' },            # C:/Recovery/             (assumed)
+    { 'file': 'desktop.ini' },
+    { 'folder': 'Windows' },                    # C:/Windows/
+    { 'folder': 'ProgramData' },                # C:/ProgramData/
+    { 'folder': 'Program Files' },              # C:/Program Files/
+    { 'folder': 'Program Files (x86)' },        # C:/Program Files (x86)/
+    { 'folder': 'Recovery' },                   # C:/Recovery/                     (assumed)
+    { 'folder': '$Recycle.Bin' },               # C:/$Recycle.Bin/                 (assumed)
+    { 'folder': '$RECYCLE.BIN' },               # C:/$RECYCLE.BIN/                 (assumed)
+    { 'folder': 'System Volume Information' },  # C:/System Volume Information/    (assumed)
 
-    { 'folder': 'Programs' },            # C:/Programs/
+    { 'folder': 'Programs' },                   # C:/Programs/
 
-    { 'folder': 'All Users' },           # C:/Users/All Users/
-    { 'folder': 'Default' },             # C:/Users/Default/
-    { 'folder': 'Public' },              # C:/Users/Public/
+    { 'folder': 'All Users' },                  # C:/Users/All Users/
+    { 'folder': 'Default' },                    # C:/Users/Default/
+    { 'folder': 'Public' },                     # C:/Users/Public/
 
-    { 'folder': '.vscode' },             # C:/Users/<User>/.vscode/
-    { 'folder': 'AppData' },             # C:/Users/<User>/AppData/
+    { 'folder': '.vscode' },                    # C:/Users/<User>/.vscode/
+    { 'folder': 'AppData' },                    # C:/Users/<User>/AppData/
 ]
 
 # Define a list of folders, files, and/or extensions to select specifically.
@@ -75,6 +81,8 @@ LOG_NAME = 'PrintPathTreeStructure.txt'
 # Clear the console every time you run the script?
 CLEAR_CONSOLE = True
 if CLEAR_CONSOLE: os.system('cls' if os.name == 'nt' else 'clear')
+
+# ------------------------------
 
 # Enables global use of LOG() without needing to pass createLogger() or logFile between functions.
 LOG = lambda *args, **kwargs: None
@@ -193,20 +201,26 @@ def getClusterAwareDiskSize(filePath, clusterSize):
 
     # Get reported on-disk size
     try:
-        high = ctypes.c_ulong()
+        high = ctypes.c_ulong(0)
         low = ctypes.windll.kernel32.GetCompressedFileSizeW(ctypes.c_wchar_p(filePath), ctypes.byref(high))
-        if low == 0xFFFFFFFF and ctypes.GetLastError() != 0:
-            raise ctypes.WinError()
-        reportedSize = (high.value << 32) + low
+
+        # Handle error from Windows API.
+        if low == 0xFFFFFFFF:
+            err = ctypes.GetLastError()
+
+            if err != 0:
+                raise ctypes.WinError(err)
+
+        reportedSize = (high.value << 32) + (low & 0xFFFFFFFF)
     except Exception as e:
-        LOG(f'Error getting real disk size: {e}', True)
-        reportedSize = actualSize  # fallback
+        LOG(f'[SIZE ERROR] {filePath} - {e}', True)
+        reportedSize = actualSize  # fallback on error
 
     # If size is exactly the same as actualSize, and tiny, treat as MFT-resident (0 disk bytes)
     if reportedSize == actualSize and actualSize < 600:
         return 0
 
-    # Otherwise, round to cluster boundary
+    # Otherwise, round to cluster boundary.
     return ((reportedSize + clusterSize - 1) // clusterSize) * clusterSize
 
 
@@ -246,14 +260,14 @@ def isIgnored(item, path=None):
     return False
 
 
-def getFolderInfoTrueDiskUsage(path):
+def getRecursiveFolderStats(path):
     fileCount = 0
     byteSizeSum = 0
     diskSizeSum = 0
 
     try:
-        clusterSize = getClusterSize(path)
         entries = os.listdir(path)
+        clusterSize = getClusterSize(path)
     except Exception as e:
         LOG(f'[ACCESS ERROR] Cannot read {path} - {e}', True)
         return 0, 0, 0
@@ -261,15 +275,24 @@ def getFolderInfoTrueDiskUsage(path):
     for entry in entries:
         fullPath = os.path.join(path, entry)
 
-        if os.path.isfile(fullPath) and isSelected(entry, fullPath) and not isIgnored(entry, fullPath):
+        if isIgnored(entry, fullPath) or not isSelected(entry, fullPath):
+            continue
+
+        if os.path.isfile(fullPath):
             try:
-                actualBytes = os.path.getsize(fullPath)
-                diskBytes = getClusterAwareDiskSize(fullPath, clusterSize)
-                byteSizeSum += actualBytes
-                diskSizeSum += diskBytes
+                actualSize = os.path.getsize(fullPath)
+                diskSize = getClusterAwareDiskSize(fullPath, clusterSize)
                 fileCount += 1
+                byteSizeSum += actualSize
+                diskSizeSum += diskSize
             except Exception as e:
                 LOG(f'[SIZE ERROR] {fullPath} - {e}', True)
+
+        elif os.path.isdir(fullPath):
+            fc, bs, ds = getRecursiveFolderStats(fullPath)
+            fileCount += fc
+            byteSizeSum += bs
+            diskSizeSum += ds
 
     return fileCount, byteSizeSum, diskSizeSum
 
@@ -293,12 +316,14 @@ def walkTree(directory, ignoreList, scanFiles=False):
     lines = []
     fileSizeMap = {}
     folderStatsMap = {}
-    maxLineLength = 0
     allCounts = []
+    maxLineLength = 0
+    longestDiskStrLen = 0
+    longestDiskLabelLen = 0
+    longestActualLabelLen = 0
 
-    def recurse(dirPath, prefix=''):
-        nonlocal maxLineLength
-
+    def recurse(dirPath, prefix='', depth=1): # Start depth at 1 (root level)
+        nonlocal maxLineLength, longestDiskStrLen, longestDiskLabelLen, longestActualLabelLen
         # Filter items based on scanFiles flag.
         try:
             raw = sorted(os.listdir(dirPath))
@@ -317,6 +342,8 @@ def walkTree(directory, ignoreList, scanFiles=False):
         for index, item in enumerate(items):
             # Define full path.
             path = os.path.join(dirPath, item)
+            if os.path.isdir(path) and DEBUG:
+                LOG(f'[VISITING] {path}', True)
 
             # Is folder flag.
             isDirFlag = os.path.isdir(path)
@@ -334,43 +361,73 @@ def walkTree(directory, ignoreList, scanFiles=False):
 
             if os.path.isfile(path):
                 if scanFiles:
-                    # Record file size if enabled.
-                    clusterSize = getClusterSize(path)
-                    actualSize = os.path.getsize(path)
-                    diskSize = getClusterAwareDiskSize(path, clusterSize)
-                    actualStr = formatFileSize(actualSize)
-                    diskStr = formatFileSize(diskSize)
-                    fileSizeMap[path] = f'Disk: {diskStr} ({diskSize:,} B) Actual: {actualStr} ({actualSize:,} B)'
-                    lines.append((line, path, False))
+                    try:
+                        # Record file size if enabled.
+                        clusterSize = getClusterSize(path)
+                        actualSize = os.path.getsize(path)
+                        diskSize = getClusterAwareDiskSize(path, clusterSize)
+
+                        diskLabel = formatFileSize(diskSize)
+                        actualLabel = formatFileSize(actualSize)
+
+                        longestDiskLabelLen = max(longestDiskLabelLen, len(diskLabel))
+                        longestActualLabelLen = max(longestActualLabelLen, len(actualLabel))
+
+                        fileSizeMap[path] = {
+                            'diskLabel': diskLabel,
+                            'actualLabel': actualLabel,
+                            'diskSize': diskSize,
+                            'actualSize': actualSize
+                        }
+
+                        diskStr = f'Disk: {diskLabel} ({diskSize:,} B)'
+                        longestDiskStrLen = max(longestDiskStrLen, len(diskStr))
+
+                        lines.append((line, path, False))
+                    except Exception as e:
+                        LOG(f'[SIZE ERROR] {path} - {e}', True)
                 continue  # Skip further logic for file.
 
             # If directory (files skip this logic).
             # Get folder's file count and size.
-            fileCount, byteSizeSum, diskSizeSum = getFolderInfoTrueDiskUsage(path)
-            folderStatsMap[path] = (fileCount, byteSizeSum, diskSizeSum)
+            fileCount, actualBytes, diskBytes = getRecursiveFolderStats(path)
+            folderStatsMap[path] = (fileCount, actualBytes, diskBytes)
             allCounts.append(f'{fileCount:,}')
+
+            diskLabel = formatFileSize(diskBytes)
+            actualLabel = formatFileSize(actualBytes)
+
+            longestDiskLabelLen = max(longestDiskLabelLen, len(diskLabel))
+            longestActualLabelLen = max(longestActualLabelLen, len(actualLabel))
+
+            folderDiskStr = f'Disk: {diskLabel} ({diskBytes:,} B)'
+            longestDiskStrLen = max(longestDiskStrLen, len(folderDiskStr))
             lines.append((line, path, True))
 
-            newPrefix = prefix + ('    ' if isLast else '│   ')
-            recurse(path, newPrefix)
+            if DEPTH_SEARCH == 0 or depth < DEPTH_SEARCH:
+                newPrefix = prefix + ('    ' if isLast else '│   ')
+                recurse(path, newPrefix, depth + 1)
 
     recurse(directory)
-    return lines, fileSizeMap, folderStatsMap, maxLineLength, allCounts
+    return lines, fileSizeMap, folderStatsMap, allCounts, maxLineLength, longestDiskStrLen, longestDiskLabelLen, longestActualLabelLen
 
 
 def generateTree(directory, ignoreList, scanFiles=False):
     # Builds a fully formatted text representation of the tree, optionally with sizes.
 
-    lines, fileSizeMap, folderStatsMap, maxLen, allCounts = walkTree(directory, ignoreList, scanFiles)
+    lines, fileSizeMap, folderStatsMap, allCounts, maxLen, longestDiskStrLen, longestDiskLabelLen, longestActualLabelLen = walkTree(directory, ignoreList, scanFiles)
 
     # Step 1: Determine maximum fileCount length (left-aligned).
     maxCountLen = max((len(c) for c in allCounts), default=0)
 
     # Step 2: Longest possible label.
-    labelLen = len('Files,')
+    labelLen = len('Files, ')
 
     # Step 3: Compute the total left-padding needed for file sizes.
     sizeAlignCol = (maxCountLen + 1 + labelLen + 1) if allCounts else 0
+
+    # Step 4: Space between 'Disk:' and 'Actual:' strings.
+    diskActualAlignCol = longestDiskStrLen + 2
 
     # Initialize tree variable.
     treeStructure = ''
@@ -381,19 +438,35 @@ def generateTree(directory, ignoreList, scanFiles=False):
         if isDir and realPath in folderStatsMap:
             fileCount, actualBytes, diskBytes = folderStatsMap[realPath]
             countStr = f'{fileCount:,}'.ljust(maxCountLen)
-            label = 'File, ' if fileCount == 1 else 'Files,'
-            diskStr = formatFileSize(diskBytes)
-            actualStr = formatFileSize(actualBytes)
-            treeStructure += (f'{line}{prefixPadding}  -  {countStr} {label} Disk: {diskStr} ({diskBytes:,} B) Actual: {actualStr} ({actualBytes:,} B)\n')
+            label = 'File,  ' if fileCount == 1 else 'Files, '
+
+            diskLabel = formatFileSize(diskBytes).ljust(longestDiskLabelLen)
+            actualLabel = formatFileSize(actualBytes).ljust(longestActualLabelLen)
+
+            diskStrFormatted = f'Disk: {diskLabel} ({diskBytes:,} B)'
+            actualStrFormatted = f'Actual: {actualLabel} ({actualBytes:,} B)'
+
+            padding = ' ' * (diskActualAlignCol - len(diskStrFormatted))
+            treeStructure += (
+                f'{line}{prefixPadding}  -  {countStr} {label} {diskStrFormatted}{padding}{actualStrFormatted}\n'
+            )
         elif not isDir and realPath in fileSizeMap:
-            sizeStr = fileSizeMap[realPath]
+            info = fileSizeMap[realPath]
+
+            diskLabel = info['diskLabel'].ljust(longestDiskLabelLen)
+            actualLabel = info['actualLabel'].ljust(longestActualLabelLen)
+
+            diskStrFormatted = f'Disk: {diskLabel} ({info["diskSize"]:,} B)'
+            actualStrFormatted = f'Actual: {actualLabel} ({info["actualSize"]:,} B)'
+
+            padding = ' ' * (diskActualAlignCol - len(diskStrFormatted))
             emptyPrefix = ' ' * sizeAlignCol if allCounts else ''
-            treeStructure += f'{line}{prefixPadding}  -  {emptyPrefix}{sizeStr}\n'
+            treeStructure += f'{line}{prefixPadding}  -  {emptyPrefix}{diskStrFormatted}{padding}{actualStrFormatted}\n'
 
     return treeStructure
 
 
-def buildSimpleTree(path, ignoreList, includeFiles, prefix=''):
+def buildSimpleTree(path, ignoreList, includeFiles, prefix='', depth=1):
     # Sort directories first, then files. Ignore folders/files in ignoreList.
 
     try:
@@ -416,6 +489,8 @@ def buildSimpleTree(path, ignoreList, includeFiles, prefix=''):
     for index, item in enumerate(items):
         # Define full path.
         subPath = os.path.join(path, item)
+        if os.path.isdir(subPath) and DEBUG:
+            LOG(f'[VISITING] {subPath}', True)
 
         # Is folder flag.
         isDirFlag = os.path.isdir(subPath)
@@ -429,9 +504,9 @@ def buildSimpleTree(path, ignoreList, includeFiles, prefix=''):
 
         yield f'{prefix}{connector}{displaySlash}'
 
-        if isDirFlag:
+        if isDirFlag and (DEPTH_SEARCH == 0 or depth < DEPTH_SEARCH):
             newPrefix = prefix + ('    ' if isLast else '│   ')
-            yield from buildSimpleTree(subPath, ignoreList, includeFiles, newPrefix)
+            yield from buildSimpleTree(subPath, ignoreList, includeFiles, newPrefix, depth + 1)
 
 
 def saveTreeToFile(directory, outputFolder, outputFile, ignoreList, showFileSize=False, scanFiles=False, showRootFolder=False):
